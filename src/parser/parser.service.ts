@@ -163,20 +163,70 @@ export class ParserService {
     const $ = cheerio.load(html);
     const phones: IPhoneListItem[] = [];
 
-    $('.makers ul li').each((_, el) => {
-      const href = $(el).find('a').attr('href');
-      if (href) {
-        const listSlug = href.replace('.php', '');
-        const rawSrc = $(el).find('img').attr('src') || '';
-        phones.push({
-          name: $(el).find('span').text().trim(),
-          slug: listSlug,
-          imageUrl: rawSrc ? toBigpicFromImgSrc(rawSrc, listSlug) : slugToBigpic(listSlug),
-          thumbUrl: rawSrc || undefined,
-          detail_url: `/${listSlug}`,
-        });
+    const extractPhones = ($doc: cheerio.CheerioAPI): IPhoneListItem[] => {
+      const extracted: IPhoneListItem[] = [];
+      $doc('.makers ul li').each((_, el) => {
+        const href = $doc(el).find('a').attr('href');
+        if (href) {
+          const listSlug = href.replace('.php', '');
+          const rawSrc = $doc(el).find('img').attr('src') || '';
+          extracted.push({
+            name: $doc(el).find('span').text().trim(),
+            slug: listSlug,
+            imageUrl: rawSrc ? toBigpicFromImgSrc(rawSrc, listSlug) : slugToBigpic(listSlug),
+            thumbUrl: rawSrc || undefined,
+            detail_url: `/${listSlug}`,
+          });
+        }
+      });
+      return extracted;
+    };
+
+    phones.push(...extractPhones($));
+
+    // Pagination parsing
+    let maxPage = 1;
+    let urlTemplate = '';
+
+    $('.nav-pages a').each((_, el) => {
+      const href = $(el).attr('href');
+      if (href && href.includes('-p')) {
+        const match = href.match(/-p(\d+)\.php/);
+        if (match) {
+          const pageNum = parseInt(match[1], 10);
+          if (pageNum > maxPage) {
+            maxPage = pageNum;
+          }
+          if (!urlTemplate) {
+            urlTemplate = href.replace(/-p\d+\.php/, '-p{page}.php');
+          }
+        }
       }
     });
+
+    if (maxPage > 1 && urlTemplate) {
+      const pagePromises = [];
+      for (let i = 2; i <= maxPage; i++) {
+        const pageUrl = `${baseUrl}/${urlTemplate.replace('{page}', i.toString())}`;
+        pagePromises.push(
+          getHtml(pageUrl)
+            .then(pageHtml => {
+              const $page = cheerio.load(pageHtml);
+              return { index: i, items: extractPhones($page) };
+            })
+            .catch(err => {
+              console.error(`[getPhonesByBrand] failed to fetch page ${i} for ${brandSlug}:`, err.message);
+              return { index: i, items: [] as IPhoneListItem[] };
+            })
+        );
+      }
+
+      const results = await Promise.all(pagePromises);
+      results.sort((a, b) => a.index - b.index);
+      for (const res of results) {
+        phones.push(...res.items);
+      }
+    }
 
     cacheSet(ck, phones);
     return phones;
