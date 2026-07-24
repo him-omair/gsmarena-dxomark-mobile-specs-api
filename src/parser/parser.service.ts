@@ -155,7 +155,7 @@ export class ParserService {
   }
 
   async getPhonesByBrand(brandSlug: string): Promise<IPhoneListItem[]> {
-    const ck = `gsm:brand:v1:${brandSlug}`;
+    const ck = `gsm:brand:v2:${brandSlug}`;
     const cached = await cacheGet<IPhoneListItem[]>(ck);
     if (cached) return cached;
 
